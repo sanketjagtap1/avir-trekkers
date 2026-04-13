@@ -52,7 +52,7 @@ jobs:
             -Dsonar.ws.timeout=300
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: https://oncologic-unreaving-lasonya.ngrok-free.dev
+          SONAR_HOST_URL: https://sonarr-sanket.technootales.in
 
   # ── Build & Deploy ─────────────────────────────────────────────────────────
   build-deploy:
