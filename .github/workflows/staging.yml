@@ -148,8 +148,8 @@ jobs:
             AVIR_ENV_EOF
             chmod 600 /opt/avir-staging/api.env
 
-      # ── Copy deployment files to VPS ─────────────────────────────────────
-      - name: Generate & copy compose + nginx config
+      # ── Copy compose file to VPS ──────────────────────────────────────────
+      - name: Copy compose file to VPS
         run: |
           GITHUB_OWNER="${{ github.repository_owner }}" \
             envsubst '${GITHUB_OWNER}' < docker/compose.staging.yml > /tmp/compose.staging.yml
@@ -158,12 +158,8 @@ jobs:
             /tmp/compose.staging.yml \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avir-staging/docker-compose.yml
 
-          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
-            docker/nginx/nginx.conf \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/avir_nginx_candidate.conf
-
       # ── Deploy ───────────────────────────────────────────────────────────
-      - name: Deploy containers & reload nginx
+      - name: Deploy containers
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -172,27 +168,13 @@ jobs:
           script: |
             set -e
 
-            # ── 1. Validate candidate nginx config ───────────────────────────
-            if ! nginx -t -c /tmp/avir_nginx_candidate.conf 2>&1; then
-              echo "✗ nginx config test failed — keeping existing config"
-              rm -f /tmp/avir_nginx_candidate.conf
-              exit 1
-            fi
-            cp /tmp/avir_nginx_candidate.conf /etc/nginx/nginx.conf
-            rm -f /tmp/avir_nginx_candidate.conf
-
-            # ── 2. GHCR auth & pull images ───────────────────────────────────
+            # ── GHCR auth & pull images ───────────────────────────────────
             docker login ghcr.io -u ${{ github.repository_owner }} -p "${{ secrets.GHCR_READ_TOKEN }}"
 
             cd /opt/avir-staging
             docker compose pull
-
-            # ── 3. Restart containers ────────────────────────────────────────
             docker compose up -d --remove-orphans
             docker image prune -f
-
-            # ── 4. Reload nginx ──────────────────────────────────────────────
-            systemctl reload nginx
 
             echo ""
             echo "✓ Staging deploy complete — $(date)"
