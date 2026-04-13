@@ -1,8 +1,8 @@
 # Production stack — all 3 services run as containers.
 # Host nginx handles SSL termination and proxies to container ports:
-#   avirtrekkers.com       → localhost:3002 (user-site)
-#   admin.avirtrekkers.com → localhost:3001 (admin-portal)
-#   /api/ on both domains  → localhost:4001 (api)
+#   avirtrekkers.com       → localhost:3004 (user-site)
+#   admin.avirtrekkers.com → localhost:3005 (admin-portal)
+#   /api/ on both domains  → localhost:4002 (api)
 #
 # GITHUB_OWNER is substituted by envsubst in CI before this file is copied to VPS.
 # api.env is written to /opt/avir-trekkers/api.env by the CI pipeline from GitHub Secrets.
@@ -14,7 +14,7 @@ services:
     image: ghcr.io/${GITHUB_OWNER}/avir-trekkers/api:latest
     container_name: avir-prod-api
     ports:
-      - "4001:4001"
+      - "4002:4001"
     env_file: /opt/avir-trekkers/api.env
     restart: unless-stopped
     healthcheck:
@@ -29,7 +29,7 @@ services:
     image: ghcr.io/${GITHUB_OWNER}/avir-trekkers/user:latest
     container_name: avir-prod-user
     ports:
-      - "3002:80"
+      - "3004:80"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
@@ -43,7 +43,7 @@ services:
     image: ghcr.io/${GITHUB_OWNER}/avir-trekkers/admin:latest
     container_name: avir-prod-admin
     ports:
-      - "3001:80"
+      - "3005:80"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
