@@ -146,20 +146,16 @@ jobs:
             AVIR_ENV_EOF
             chmod 600 /opt/avir-trekkers/api.env
 
-      - name: Copy compose & nginx config
+      - name: Copy compose file to VPS
         run: |
           GITHUB_OWNER="${{ github.repository_owner }}" \
-            envsubst '${GITHUB_OWNER}' < docker-compose.yml > /tmp/compose.prod.yml
+            envsubst '${GITHUB_OWNER}' < docker/compose.production.yml > /tmp/compose.prod.yml
 
           scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
             /tmp/compose.prod.yml \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avir-trekkers/docker-compose.yml
 
-          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
-            docker/nginx/nginx.conf \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/avir_nginx_candidate.conf
-
-      - name: Deploy & reload
+      - name: Deploy containers
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -168,15 +164,6 @@ jobs:
           script: |
             set -e
 
-            # ── Validate nginx config before applying ───────────────────────
-            if ! nginx -t -c /tmp/avir_nginx_candidate.conf 2>&1; then
-              echo "✗ nginx config test failed — aborting deploy"
-              rm -f /tmp/avir_nginx_candidate.conf
-              exit 1
-            fi
-            cp /tmp/avir_nginx_candidate.conf /etc/nginx/nginx.conf
-            rm -f /tmp/avir_nginx_candidate.conf
-
             # ── GHCR auth & pull latest images ──────────────────────────────
             docker login ghcr.io -u ${{ github.repository_owner }} -p "${{ secrets.GHCR_READ_TOKEN }}"
 
@@ -184,9 +171,6 @@ jobs:
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
-
-            # ── Reload nginx ─────────────────────────────────────────────────
-            systemctl reload nginx
 
             echo ""
             echo "✓ Production deploy complete — $(date)"
