@@ -37,23 +37,23 @@ env:
 
 jobs:
   # ── SonarQube (parallel, non-blocking on staging) ─────────────────────────
-  sonar:
-    name: SonarQube Analysis
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  # sonar:
+  #   name: SonarQube Analysis
+  #   runs-on: ubuntu-latest
+  #   continue-on-error: true
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
 
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@v2
-        with:
-          args: >
-            -Dsonar.ws.timeout=300
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: https://sonar-sanket.technootales.in
+  #     - name: SonarQube Scan
+  #       uses: sonarsource/sonarqube-scan-action@v2
+  #       with:
+  #         args: >
+  #           -Dsonar.ws.timeout=300
+  #       env:
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #         SONAR_HOST_URL: https://sonar-sanket.technootales.in
 
   # ── Build & Deploy ─────────────────────────────────────────────────────────
   build-deploy:
