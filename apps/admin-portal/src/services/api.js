@@ -76,6 +76,8 @@ export const updateGalleryTrek = (id, data) => api.put(`/gallery/gallery-treks/$
 export const deleteGalleryTrek = (id) => api.delete(`/gallery/gallery-treks/${id}`);
 export const addGalleryTrekImages = (id, data) => api.post(`/gallery/gallery-treks/${id}/images`, data);
 export const removeGalleryTrekImage = (id, imageUrl) => api.delete(`/gallery/gallery-treks/${id}/images/${encodeURIComponent(imageUrl)}`);
+export const toggleSocialActivity = (id) => api.patch(`/gallery/social-activities/${id}/toggle`);
+export const toggleGalleryTrek = (id) => api.patch(`/gallery/gallery-treks/${id}/toggle`);
 
 // Auth – Change password
 export const changePassword = (data) => api.post("/auth/change-password", data);

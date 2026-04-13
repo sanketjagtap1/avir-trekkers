@@ -69,25 +69,43 @@ const getTrekGallery = async (req, res) => {
 // GET: Get all social activities for gallery
 const getSocialActivityGallery = async (req, res) => {
     try {
-        // Get all active activities, then filter for those with images
-        const allActivities = await SocialActivity.find({ 
+        const limit = Math.max(1, parseInt(req.query.limit) || 50);
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const skip = (page - 1) * limit;
+
+        const filter = {
             isActive: true,
             images: { $exists: true }
-        })
-        .populate('createdBy', 'fullName')
-        .select('title description images category date location')
-        .sort({ date: -1 })
-        .lean();
+        };
+
+        // Count all matching docs before the in-memory image filter; we do
+        // the image-presence filter in JS (same as before), so we fetch one
+        // page-worth of candidates and also get the total filtered count.
+        const allMatching = await SocialActivity.find(filter)
+            .populate('createdBy', 'fullName')
+            .select('title description images category date location')
+            .sort({ date: -1 })
+            .lean();
 
         // Filter activities that have at least one image
-        const activities = allActivities.filter(activity => 
+        const withImages = allMatching.filter(activity =>
             activity.images && Array.isArray(activity.images) && activity.images.length > 0
         );
+
+        const total = withImages.length;
+        const totalPages = Math.ceil(total / limit) || 1;
+        const activities = withImages.slice(skip, skip + limit);
 
         res.status(200).json({
             success: true,
             data: activities,
-            count: activities.length
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages,
+                hasMore: page < totalPages
+            }
         });
     } catch (error) {
         console.error("Error fetching social activity gallery:", error);
@@ -419,7 +437,11 @@ const getAllSocialActivities = async (req, res) => {
 // GET: Get all gallery treks for public gallery
 const getGalleryTrekGallery = async (req, res) => {
     try {
-        const galleryTreks = await GalleryTrek.find({ 
+        const limit = Math.max(1, parseInt(req.query.limit) || 50);
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const skip = (page - 1) * limit;
+
+        const allGalleryTreks = await GalleryTrek.find({
             isActive: true,
             images: { $exists: true, $ne: [] }
         })
@@ -428,8 +450,8 @@ const getGalleryTrekGallery = async (req, res) => {
         .sort({ date: -1, createdAt: -1 })
         .lean();
 
-        // Filter to only include treks with actual images
-        const treksWithImages = galleryTreks
+        // Filter to only include treks with actual images then shape the response
+        const allTreksWithImages = allGalleryTreks
             .filter(trek => trek.images && Array.isArray(trek.images) && trek.images.length > 0)
             .map(trek => ({
                 _id: trek._id,
@@ -445,9 +467,20 @@ const getGalleryTrekGallery = async (req, res) => {
                 date: trek.date
             }));
 
+        const total = allTreksWithImages.length;
+        const totalPages = Math.ceil(total / limit) || 1;
+        const treksWithImages = allTreksWithImages.slice(skip, skip + limit);
+
         res.status(200).json({
             success: true,
-            data: treksWithImages
+            data: treksWithImages,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages,
+                hasMore: page < totalPages
+            }
         });
     } catch (error) {
         console.error("Error fetching gallery trek gallery:", error);
@@ -700,6 +733,68 @@ const deleteGalleryTrek = async (req, res) => {
     }
 };
 
+// PATCH: Toggle isActive on a social activity
+const toggleSocialActivity = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const activity = await SocialActivity.findById(id);
+        if (!activity) {
+            return res.status(404).json({
+                success: false,
+                error: "Social activity not found"
+            });
+        }
+
+        activity.isActive = !activity.isActive;
+        activity.updatedAt = new Date();
+        await activity.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Social activity ${activity.isActive ? "activated" : "deactivated"} successfully`,
+            data: activity
+        });
+    } catch (error) {
+        console.error("Error toggling social activity:", error);
+        res.status(500).json({
+            success: false,
+            error: "Failed to toggle social activity"
+        });
+    }
+};
+
+// PATCH: Toggle isActive on a gallery trek
+const toggleGalleryTrek = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const galleryTrek = await GalleryTrek.findById(id);
+        if (!galleryTrek) {
+            return res.status(404).json({
+                success: false,
+                error: "Gallery trek not found"
+            });
+        }
+
+        galleryTrek.isActive = !galleryTrek.isActive;
+        galleryTrek.updatedAt = new Date();
+        await galleryTrek.save();
+
+        res.status(200).json({
+            success: true,
+            message: `Gallery trek ${galleryTrek.isActive ? "activated" : "deactivated"} successfully`,
+            data: galleryTrek
+        });
+    } catch (error) {
+        console.error("Error toggling gallery trek:", error);
+        res.status(500).json({
+            success: false,
+            error: "Failed to toggle gallery trek"
+        });
+    }
+};
+
 module.exports = {
     getTrekGallery,
     getSocialActivityGallery,
@@ -711,6 +806,7 @@ module.exports = {
     removeSocialActivityImage,
     deleteSocialActivity,
     getAllSocialActivities,
+    toggleSocialActivity,
     // Gallery Trek functions
     getGalleryTrekGallery,
     getAllGalleryTreks,
@@ -718,5 +814,6 @@ module.exports = {
     updateGalleryTrek,
     addGalleryTrekImages,
     removeGalleryTrekImage,
-    deleteGalleryTrek
+    deleteGalleryTrek,
+    toggleGalleryTrek
 };

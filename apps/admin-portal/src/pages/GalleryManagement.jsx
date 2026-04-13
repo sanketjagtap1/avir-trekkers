@@ -5,11 +5,13 @@ import {
   addSocialActivityImages, removeSocialActivityImage,
   getGalleryTreks, createGalleryTrek, updateGalleryTrek, deleteGalleryTrek,
   addGalleryTrekImages, removeGalleryTrekImage,
+  toggleSocialActivity, toggleGalleryTrek,
 } from "../services/api";
 import { formatDate } from "../lib/utils";
 import {
   Plus, Trash2, Image as ImageIcon, AlertCircle, Loader2, X,
   Edit2, Upload, Mountain, Users, AlertTriangle, CheckCircle2,
+  Eye, EyeOff,
 } from "lucide-react";
 import Pagination from "../components/common/Pagination";
 
@@ -312,7 +314,7 @@ function GalleryTrekModal({ item, onClose, onSave, saving }) {
 }
 
 // ── Card component ─────────────────────────────────────────────────────────────
-function ItemCard({ item, onEdit, onDelete, badge }) {
+function ItemCard({ item, onEdit, onDelete, onToggle, isActive, badge }) {
   const id = item._id || item.id;
   const images = item.images || [];
 
@@ -320,16 +322,26 @@ function ItemCard({ item, onEdit, onDelete, badge }) {
     <div className="glass-card rounded-2xl overflow-hidden group hover:shadow-lg transition-shadow">
       {/* Image strip */}
       {images.length > 0 ? (
-        <div className={`grid gap-0.5 h-36 overflow-hidden bg-white/[0.06] ${images.length === 1 ? "grid-cols-1" : images.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+        <div className={`relative grid gap-0.5 h-36 overflow-hidden bg-white/[0.06] ${images.length === 1 ? "grid-cols-1" : images.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
           {images.slice(0, 3).map((img, i) => (
             <img key={i} src={typeof img === "string" ? img : img.url} alt=""
               className="w-full h-full object-cover"
               onError={(e) => { e.target.style.display = "none"; }} />
           ))}
+          {!isActive && (
+            <span className="absolute top-0 left-0 bg-amber-500/80 text-white text-xs px-2 py-0.5 rounded-br-lg">
+              Hidden
+            </span>
+          )}
         </div>
       ) : (
-        <div className="h-36 bg-white/[0.04] flex items-center justify-center">
+        <div className="relative h-36 bg-white/[0.04] flex items-center justify-center">
           <ImageIcon className="w-8 h-8 text-white/15" />
+          {!isActive && (
+            <span className="absolute top-0 left-0 bg-amber-500/80 text-white text-xs px-2 py-0.5 rounded-br-lg">
+              Hidden
+            </span>
+          )}
         </div>
       )}
 
@@ -355,6 +367,15 @@ function ItemCard({ item, onEdit, onDelete, badge }) {
             <button onClick={() => onEdit(item)}
               className="p-1.5 rounded-lg hover:bg-blue-500/10 text-blue-400 transition-colors" title="Edit">
               <Edit2 className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => onToggle(item)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                isActive
+                  ? "hover:bg-white/10 text-white/40"
+                  : "hover:bg-amber-500/10 text-amber-400"
+              }`}
+              title={isActive ? "Hide" : "Show"}>
+              {isActive ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
             <button onClick={() => onDelete(item)}
               className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors" title="Delete">
@@ -432,12 +453,13 @@ export default function GalleryManagement() {
     setSavingId("activity");
     try {
       if (isEdit) {
-        await updateSocialActivity(id, data);
+        const res = await updateSocialActivity(id, data);
+        setActivities(prev => prev.map(a => a._id === id ? res.data.data : a));
       } else {
-        await createSocialActivity(data);
+        const res = await createSocialActivity(data);
+        setActivities(prev => [res.data.data, ...prev]);
       }
       setActivityModal(null);
-      await fetchActivities();
       showToast("success", isEdit ? "Activity updated" : "Activity created");
     } catch (err) {
       showToast("error", err.response?.data?.message || "Failed to save activity");
@@ -453,12 +475,13 @@ export default function GalleryManagement() {
     setSavingId("trek");
     try {
       if (isEdit) {
-        await updateGalleryTrek(id, data);
+        const res = await updateGalleryTrek(id, data);
+        setGalleryTreks(prev => prev.map(t => t._id === id ? res.data.data : t));
       } else {
-        await createGalleryTrek(data);
+        const res = await createGalleryTrek(data);
+        setGalleryTreks(prev => [res.data.data, ...prev]);
       }
       setTrekModal(null);
-      await fetchGalleryTreks();
       showToast("success", isEdit ? "Trek updated" : "Trek created");
     } catch (err) {
       showToast("error", err.response?.data?.message || "Failed to save trek");
@@ -476,10 +499,10 @@ export default function GalleryManagement() {
     try {
       if (type === "activity") {
         await deleteSocialActivity(id);
-        await fetchActivities();
+        setActivities(prev => prev.filter(a => (a._id || a.id) !== id));
       } else {
         await deleteGalleryTrek(id);
-        await fetchGalleryTreks();
+        setGalleryTreks(prev => prev.filter(t => (t._id || t.id) !== id));
       }
       setDeleteTarget(null);
       showToast("success", "Deleted successfully");
@@ -487,6 +510,29 @@ export default function GalleryManagement() {
       showToast("error", err.response?.data?.message || "Failed to delete");
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  // Toggle visibility
+  const handleToggleActivity = async (item) => {
+    const id = item._id || item.id;
+    try {
+      const res = await toggleSocialActivity(id);
+      setActivities(prev => prev.map(a => (a._id || a.id) === id ? res.data.data : a));
+      showToast("success", res.data.data.isActive ? "Activity visible" : "Activity hidden");
+    } catch {
+      showToast("error", "Failed to toggle visibility");
+    }
+  };
+
+  const handleToggleTrek = async (item) => {
+    const id = item._id || item.id;
+    try {
+      const res = await toggleGalleryTrek(id);
+      setGalleryTreks(prev => prev.map(t => (t._id || t.id) === id ? res.data.data : t));
+      showToast("success", res.data.data.isActive ? "Trek visible" : "Trek hidden");
+    } catch {
+      showToast("error", "Failed to toggle visibility");
     }
   };
 
@@ -573,6 +619,8 @@ export default function GalleryManagement() {
                   badge={act.category}
                   onEdit={(item) => setActivityModal(item)}
                   onDelete={(item) => setDeleteTarget({ item, type: "activity" })}
+                  onToggle={handleToggleActivity}
+                  isActive={act.isActive !== false}
                 />
               ))}
             </div>
@@ -619,6 +667,8 @@ export default function GalleryManagement() {
                   badge={trek.difficulty}
                   onEdit={(item) => setTrekModal(item)}
                   onDelete={(item) => setDeleteTarget({ item, type: "trek" })}
+                  onToggle={handleToggleTrek}
+                  isActive={trek.isActive !== false}
                 />
               ))}
             </div>

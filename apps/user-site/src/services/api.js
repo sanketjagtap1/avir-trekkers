@@ -41,8 +41,8 @@ export const submitReview = (data) => api.post("/reviews/submit", data);
 
 // Gallery
 export const getTrekGallery = () => api.get("/gallery/treks");
-export const getSocialActivities = () => api.get("/gallery/social-activities");
-export const getGalleryTreks = () => api.get("/gallery/gallery-treks");
+export const getSocialActivities = (params) => api.get("/gallery/social-activities", { params });
+export const getGalleryTreks = (params) => api.get("/gallery/gallery-treks", { params });
 
 // Categories
 export const getCategories = () => api.get("/categories");
