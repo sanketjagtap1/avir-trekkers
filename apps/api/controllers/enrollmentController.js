@@ -493,13 +493,52 @@ const getEnrollmentStats = async (req, res) => {
         const paidEnrollments = await Enrollment.countDocuments({ paymentStatus: "Paid" });
         const pendingEnrollments = await Enrollment.countDocuments({ enrollmentStatus: "Pending" });
 
+        // Recent enrollments for dashboard
+        const recentEnrollments = await Enrollment.find()
+            .populate('trek', 'title')
+            .sort({ enrolledAt: -1 })
+            .limit(5)
+            .lean()
+            .then(docs => docs.map(d => ({
+                _id: d._id,
+                participantName: d.participantName || d.fullName,
+                trekName: d.trek?.title || "Unknown Trek",
+                paymentStatus: d.paymentStatus?.toLowerCase(),
+                status: d.enrollmentStatus?.toLowerCase(),
+                enrolledAt: d.enrolledAt
+            })));
+
+        // Enrollments grouped by trek for chart
+        const byTrek = await Enrollment.aggregate([
+            {
+                $lookup: {
+                    from: "treks",
+                    localField: "trek",
+                    foreignField: "_id",
+                    as: "trekInfo"
+                }
+            },
+            { $unwind: { path: "$trekInfo", preserveNullAndEmptyArrays: true } },
+            {
+                $group: {
+                    _id: "$trek",
+                    name: { $first: "$trekInfo.title" },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+        ]);
+
         res.status(200).json({
             success: true,
             data: {
                 totalEnrollments,
                 paidEnrollments,
                 pendingEnrollments,
-                statusBreakdown: stats
+                statusBreakdown: stats,
+                recentEnrollments,
+                byTrek
             }
         });
     } catch (error) {
