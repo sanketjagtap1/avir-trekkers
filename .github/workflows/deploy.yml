@@ -109,6 +109,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: read
     environment:
       name: production
       url: https://avirtrekkers.com
@@ -156,16 +159,16 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avir-trekkers/docker-compose.yml
 
       - name: Deploy containers
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: GHCR_TOKEN,GHCR_USER
           script: |
             set -e
 
-            # ── GHCR auth & pull latest images ──────────────────────────────
-            docker login ghcr.io -u ${{ github.repository_owner }} -p "${{ secrets.GHCR_READ_TOKEN }}"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
             cd /opt/avir-trekkers
             docker compose pull
@@ -176,3 +179,6 @@ jobs:
             echo "✓ Production deploy complete — $(date)"
             echo "  Site  : https://avirtrekkers.com"
             echo "  Admin : https://admin.avirtrekkers.com"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
