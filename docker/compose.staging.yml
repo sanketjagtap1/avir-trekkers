@@ -1,0 +1,60 @@
+version: "3.8"
+
+# Staging stack — all 3 services run as containers.
+# Host nginx handles SSL termination and proxies to container ports:
+#   staging.avirtrekkers.com       → localhost:3002 (user-site)
+#   admin-staging.avirtrekkers.com → localhost:3001 (admin-portal)
+#   /api/ on both domains          → localhost:4001 (api)
+#
+# GITHUB_OWNER is substituted by envsubst in CI before this file is copied to VPS.
+# api.env is written to /opt/avir-staging/api.env by the CI pipeline from GitHub Secrets.
+
+services:
+
+  # ── Express API ────────────────────────────────────────────────────────────
+  api:
+    image: ghcr.io/${GITHUB_OWNER}/avir-trekkers/api:staging
+    container_name: avir-staging-api
+    ports:
+      - "4001:4001"
+    env_file: /opt/avir-staging/api.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── User Site (React/Vite → nginx:alpine) ─────────────────────────────────
+  user-site:
+    image: ghcr.io/${GITHUB_OWNER}/avir-trekkers/user:staging
+    container_name: avir-staging-user
+    ports:
+      - "3002:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Admin Portal (React/Vite → nginx:alpine) ──────────────────────────────
+  admin-portal:
+    image: ghcr.io/${GITHUB_OWNER}/avir-trekkers/admin:staging
+    container_name: avir-staging-admin
+    ports:
+      - "3001:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+    name: avir-staging
+    driver: bridge

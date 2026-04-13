@@ -1,4 +1,22 @@
-name: Build & Deploy to VPS
+# ─── Required GitHub Secrets ──────────────────────────────────────────────────
+#
+#  VPS_HOST              VPS IP address or hostname
+#  VPS_USER              SSH username
+#  VPS_SSH_KEY           Ed25519 private SSH key
+#  GHCR_READ_TOKEN       GitHub PAT with `read:packages` scope
+#  SONAR_TOKEN           Token from https://sonar-sanket.technootales.in/account/security
+#  CERT_EMAIL            Email for Let's Encrypt registration
+#
+#  ── Production API environment vars ──
+#  PROD_MONGODB_URL      MongoDB connection string (production DB)
+#  PROD_JWT_SECRET       JWT secret for production API
+#  SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS
+#  CONTACT_SMTP_USER / CONTACT_SMTP_PASS
+#  CLOUD_BASE
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: Production — Build & Deploy
 
 on:
   push:
@@ -10,17 +28,52 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/avir-trekkers
 
 jobs:
+  # ── SonarQube (blocking quality gate on production) ───────────────────────
+  sonar:
+    name: SonarQube Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonar-sanket.technootales.in
+
+  # ── Build & push Docker images ────────────────────────────────────────────
   build:
+    name: Build & Push Images
+    needs: sonar
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Login to GitHub Container Registry
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Build user-site
+        working-directory: apps/user-site
+        run: npm ci && npm run build
+
+      - name: Build admin-portal
+        working-directory: apps/admin-portal
+        run: npm ci && npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -28,44 +81,133 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push API image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.api
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}/api:latest,${{ env.IMAGE_PREFIX }}/api:${{ github.sha }}
+          cache-from: type=gha,scope=prod-api
+          cache-to: type=gha,scope=prod-api,mode=max
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:latest
+            ${{ env.IMAGE_PREFIX }}/api:${{ github.sha }}
 
       - name: Build & push User Site image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.user
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}/user:latest,${{ env.IMAGE_PREFIX }}/user:${{ github.sha }}
+          cache-from: type=gha,scope=prod-user
+          cache-to: type=gha,scope=prod-user,mode=max
+          build-args: |
+            VITE_WHATSAPP_NUMBER=${{ secrets.VITE_WHATSAPP_NUMBER }}
+            VITE_WHATSAPP_MESSAGE=${{ secrets.VITE_WHATSAPP_MESSAGE }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/user:latest
+            ${{ env.IMAGE_PREFIX }}/user:${{ github.sha }}
 
       - name: Build & push Admin Portal image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.admin
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}/admin:latest,${{ env.IMAGE_PREFIX }}/admin:${{ github.sha }}
+          cache-from: type=gha,scope=prod-admin
+          cache-to: type=gha,scope=prod-admin,mode=max
+          build-args: |
+            VITE_CLOUD_API_BASE=${{ secrets.VITE_CLOUD_API_BASE }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/admin:latest
+            ${{ env.IMAGE_PREFIX }}/admin:${{ github.sha }}
 
+  # ── Deploy to production VPS ──────────────────────────────────────────────
   deploy:
+    name: Deploy to Production
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://avirtrekkers.com
 
     steps:
-      - name: Deploy to VPS
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Write production API env file on VPS
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            mkdir -p /opt/avir-trekkers
+            cat > /opt/avir-trekkers/api.env << 'AVIR_ENV_EOF'
+            NODE_ENV=production
+            PORT=4001
+            MONGODB_URL=${{ secrets.PROD_MONGODB_URL }}
+            JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
+            SMTP_HOST=${{ secrets.SMTP_HOST }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASS=${{ secrets.SMTP_PASS }}
+            CONTACT_SMTP_USER=${{ secrets.CONTACT_SMTP_USER }}
+            CONTACT_SMTP_PASS=${{ secrets.CONTACT_SMTP_PASS }}
+            AVIR_ENV_EOF
+            chmod 600 /opt/avir-trekkers/api.env
+
+      - name: Copy compose & nginx config
+        run: |
+          GITHUB_OWNER="${{ github.repository_owner }}" \
+            envsubst '${GITHUB_OWNER}' < docker-compose.yml > /tmp/compose.prod.yml
+
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            /tmp/compose.prod.yml \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avir-trekkers/docker-compose.yml
+
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            docker/nginx/nginx.conf \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/avir_nginx_candidate.conf
+
+      - name: Deploy & reload
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+
+            # ── Validate nginx config before applying ───────────────────────
+            if ! nginx -t -c /tmp/avir_nginx_candidate.conf 2>&1; then
+              echo "✗ nginx config test failed — aborting deploy"
+              rm -f /tmp/avir_nginx_candidate.conf
+              exit 1
+            fi
+            cp /tmp/avir_nginx_candidate.conf /etc/nginx/nginx.conf
+            rm -f /tmp/avir_nginx_candidate.conf
+
+            # ── GHCR auth & pull latest images ──────────────────────────────
+            echo "${{ secrets.GHCR_READ_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
             cd /opt/avir-trekkers
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
-            echo "Deployed at $(date)"
+
+            # ── Reload nginx ─────────────────────────────────────────────────
+            systemctl reload nginx
+
+            echo ""
+            echo "✓ Production deploy complete — $(date)"
+            echo "  Site  : https://avirtrekkers.com"
+            echo "  Admin : https://admin.avirtrekkers.com"

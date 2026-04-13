@@ -6,6 +6,11 @@ COPY apps/admin-portal/package*.json ./
 RUN npm ci
 
 COPY apps/admin-portal/ .
+
+# Build-time env vars (Vite embeds these into the bundle at build time)
+ARG VITE_CLOUD_API_BASE
+ENV VITE_CLOUD_API_BASE=$VITE_CLOUD_API_BASE
+
 RUN npm run build
 
 # --- Production stage ---

@@ -10,6 +10,7 @@ import GalleryManagement from "./pages/GalleryManagement";
 import ReviewManagement from "./pages/ReviewManagement";
 import Inquiries from "./pages/Inquiries";
 import AdminSettings from "./pages/AdminSettings";
+import SiteContent from "./pages/SiteContent";
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/gallery" element={<GalleryManagement />} />
             <Route path="/reviews" element={<ReviewManagement />} />
             <Route path="/inquiries" element={<Inquiries />} />
+            <Route path="/site-content" element={<SiteContent />} />
             <Route path="/settings" element={<AdminSettings />} />
           </Route>
         </Routes>

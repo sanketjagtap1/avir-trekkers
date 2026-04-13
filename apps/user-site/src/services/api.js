@@ -29,10 +29,7 @@ export const getTreksByCategory = (category) =>
 // Enrollments
 export const sendOTP = (data) => api.post("/enrollments/send-otp", data);
 export const verifyOTP = (data) => api.post("/enrollments/verify-otp", data);
-export const createEnrollment = (data, token) =>
-  api.post("/enrollments", data, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export const createEnrollment = (data) => api.post("/enrollments", data);
 
 // Reviews
 export const getPublicReviews = () => api.get("/reviews/public");
@@ -43,6 +40,15 @@ export const submitReview = (data) => api.post("/reviews/submit", data);
 export const getTrekGallery = () => api.get("/gallery/treks");
 export const getSocialActivities = (params) => api.get("/gallery/social-activities", { params });
 export const getGalleryTreks = (params) => api.get("/gallery/gallery-treks", { params });
+
+// Site — stats, settings, hero slides, team
+export const getSiteStats    = ()     => api.get("/site/stats");
+export const getSiteSettings = ()     => api.get("/site/settings");
+export const getHeroSlides   = ()     => api.get("/site/hero-slides");
+export const getTeamMembers  = ()     => api.get("/site/team");
+
+// Contact
+export const submitContactForm = (data) => api.post("/contact", data);
 
 // Categories
 export const getCategories = () => api.get("/categories");

@@ -79,6 +79,31 @@ export const removeGalleryTrekImage = (id, imageUrl) => api.delete(`/gallery/gal
 export const toggleSocialActivity = (id) => api.patch(`/gallery/social-activities/${id}/toggle`);
 export const toggleGalleryTrek = (id) => api.patch(`/gallery/gallery-treks/${id}/toggle`);
 
+// Site Content – Stats
+export const adminGetSiteStats    = ()       => api.get("/site/stats");
+export const adminUpdateSiteStats = (data)   => api.put("/site/stats", data);
+
+// Site Content – Settings
+export const adminGetSiteSettings    = ()     => api.get("/site/settings");
+export const adminUpdateSiteSettings = (data) => api.put("/site/settings", data);
+
+// Site Content – Hero Slides
+export const adminGetHeroSlides    = ()         => api.get("/site/hero-slides");
+export const adminCreateHeroSlide  = (data)     => api.post("/site/hero-slides", data);
+export const adminUpdateHeroSlide  = (id, data) => api.put(`/site/hero-slides/${id}`, data);
+export const adminDeleteHeroSlide  = (id)       => api.delete(`/site/hero-slides/${id}`);
+
+// Site Content – Team
+export const adminGetTeam          = ()         => api.get("/site/team");
+export const adminCreateTeamMember = (data)     => api.post("/site/team", data);
+export const adminUpdateTeamMember = (id, data) => api.put(`/site/team/${id}`, data);
+export const adminDeleteTeamMember = (id)       => api.delete(`/site/team/${id}`);
+
+// Inquiries
+export const getInquiries          = (params) => api.get("/contact/admin", { params });
+export const updateInquiryStatus   = (id, status) => api.patch(`/contact/admin/${id}/status`, { status });
+export const replyToInquiry        = (id, replyBody) => api.post(`/contact/admin/${id}/reply`, { replyBody });
+
 // Auth – Change password
 export const changePassword = (data) => api.post("/auth/change-password", data);
 

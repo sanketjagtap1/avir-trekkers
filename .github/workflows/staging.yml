@@ -1,0 +1,239 @@
+# ─── Required GitHub Secrets ──────────────────────────────────────────────────
+#
+#  VPS_HOST              VPS IP address or hostname
+#  VPS_USER              SSH username (root or a deploy user)
+#  VPS_SSH_KEY           Ed25519 private key for SSH (add the public key to VPS ~/.ssh/authorized_keys)
+#  GHCR_READ_TOKEN       GitHub PAT with `read:packages` scope — used by VPS to pull images
+#  SONAR_TOKEN           Token from https://sonar-sanket.technootales.in/account/security
+#  CERT_EMAIL            Email for Let's Encrypt registration (e.g. contact@avirtrekkers.com)
+#
+#  ── Staging API environment vars (written to VPS as /opt/avir-staging/api.env) ──
+#  STAGING_MONGODB_URL   MongoDB connection string (staging DB)
+#  STAGING_JWT_SECRET    JWT secret for the staging API
+#  SMTP_HOST             mail.avirtrekkers.com
+#  SMTP_PORT             465
+#  SMTP_USER             no-reply@avirtrekkers.com
+#  SMTP_PASS             no-reply SMTP password
+#  CONTACT_SMTP_USER     contact@avirtrekkers.com
+#  CONTACT_SMTP_PASS     contact SMTP password
+#
+#  ── Frontend build-time vars (baked into Docker images at build) ──────────
+#  VITE_WHATSAPP_NUMBER  WhatsApp number for user-site (e.g. 919766369007)
+#  VITE_WHATSAPP_MESSAGE Default WhatsApp pre-fill message for user-site
+#  VITE_CLOUD_API_BASE   Cloud upload API base URL for admin-portal
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: Staging — Build & Deploy
+
+on:
+  push:
+    branches: [develop, staging]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/avir-trekkers
+
+jobs:
+  # ── SonarQube (parallel, non-blocking on staging) ─────────────────────────
+  sonar:
+    name: SonarQube Analysis
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonar-sanket.technootales.in
+
+  # ── Build & Deploy ─────────────────────────────────────────────────────────
+  build-deploy:
+    name: Build & Deploy to Staging
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    environment:
+      name: staging
+      url: https://staging.avirtrekkers.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── Build frontend apps ──────────────────────────────────────────────
+      - name: Build user-site
+        working-directory: apps/user-site
+        run: npm ci && npm run build
+
+      - name: Build admin-portal
+        working-directory: apps/admin-portal
+        run: npm ci && npm run build
+
+      # ── Build & push Docker images ───────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          cache-from: type=gha,scope=staging-api
+          cache-to: type=gha,scope=staging-api,mode=max
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:staging
+            ${{ env.IMAGE_PREFIX }}/api:staging-${{ github.sha }}
+
+      - name: Build & push User Site image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.user
+          push: true
+          cache-from: type=gha,scope=staging-user
+          cache-to: type=gha,scope=staging-user,mode=max
+          build-args: |
+            VITE_WHATSAPP_NUMBER=${{ secrets.VITE_WHATSAPP_NUMBER }}
+            VITE_WHATSAPP_MESSAGE=${{ secrets.VITE_WHATSAPP_MESSAGE }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/user:staging
+            ${{ env.IMAGE_PREFIX }}/user:staging-${{ github.sha }}
+
+      - name: Build & push Admin Portal image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.admin
+          push: true
+          cache-from: type=gha,scope=staging-admin
+          cache-to: type=gha,scope=staging-admin,mode=max
+          build-args: |
+            VITE_CLOUD_API_BASE=${{ secrets.VITE_CLOUD_API_BASE }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/admin:staging
+            ${{ env.IMAGE_PREFIX }}/admin:staging-${{ github.sha }}
+
+      # ── Prepare SSH ──────────────────────────────────────────────────────
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      # ── Write api.env from GitHub Secrets ───────────────────────────────
+      # Single-quoted heredoc: shell does NOT expand vars; GitHub Actions
+      # expands ${{ secrets.* }} before the script is sent, so actual values
+      # land in the file as literals — safe for passwords with special chars.
+      - name: Write API env file on VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            mkdir -p /opt/avir-staging
+            cat > /opt/avir-staging/api.env << 'AVIR_ENV_EOF'
+            NODE_ENV=staging
+            PORT=4001
+            MONGODB_URL=${{ secrets.STAGING_MONGODB_URL }}
+            JWT_SECRET=${{ secrets.STAGING_JWT_SECRET }}
+            SMTP_HOST=${{ secrets.SMTP_HOST }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASS=${{ secrets.SMTP_PASS }}
+            CONTACT_SMTP_USER=${{ secrets.CONTACT_SMTP_USER }}
+            CONTACT_SMTP_PASS=${{ secrets.CONTACT_SMTP_PASS }}
+            AVIR_ENV_EOF
+            chmod 600 /opt/avir-staging/api.env
+
+      # ── Copy deployment files to VPS ─────────────────────────────────────
+      - name: Generate & copy compose + nginx config
+        run: |
+          # Resolve GITHUB_OWNER placeholder in compose template
+          GITHUB_OWNER="${{ github.repository_owner }}" \
+            envsubst '${GITHUB_OWNER}' < docker/compose.staging.yml > /tmp/compose.staging.yml
+
+          # docker-compose.yml on VPS
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            /tmp/compose.staging.yml \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/avir-staging/docker-compose.yml
+
+          # nginx.conf — repo is the source of truth for the full VPS nginx config
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            docker/nginx/nginx.conf \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/avir_nginx_candidate.conf
+
+      # ── Deploy ───────────────────────────────────────────────────────────
+      - name: Deploy containers & reload nginx
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+
+            # ── 1. SSL: auto-issue cert for admin-staging if not yet present ──
+            ADMIN_CERT=/etc/letsencrypt/live/admin-staging.avirtrekkers.com/fullchain.pem
+            if [ ! -f "$ADMIN_CERT" ]; then
+              echo "⟳ Obtaining SSL cert for admin-staging.avirtrekkers.com ..."
+              # Test nginx config without admin-staging SSL block to allow HTTP-01 challenge
+              # certbot --nginx uses nginx to serve the ACME challenge automatically
+              certbot certonly --nginx \
+                -d admin-staging.avirtrekkers.com \
+                --non-interactive --agree-tos \
+                -m ${{ secrets.CERT_EMAIL }} \
+                --keep-until-expiring
+              echo "✓ Cert obtained"
+            fi
+
+            # ── 2. Validate candidate nginx config ───────────────────────────
+            if ! nginx -t -c /tmp/avir_nginx_candidate.conf 2>&1; then
+              echo "✗ nginx config test failed — keeping existing config"
+              rm -f /tmp/avir_nginx_candidate.conf
+              exit 1
+            fi
+            cp /tmp/avir_nginx_candidate.conf /etc/nginx/nginx.conf
+            rm -f /tmp/avir_nginx_candidate.conf
+
+            # ── 3. GHCR auth & pull images ───────────────────────────────────
+            echo "${{ secrets.GHCR_READ_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+            cd /opt/avir-staging
+            docker compose pull
+
+            # ── 4. Restart containers ────────────────────────────────────────
+            docker compose up -d --remove-orphans
+            docker image prune -f
+
+            # ── 5. Reload nginx ──────────────────────────────────────────────
+            systemctl reload nginx
+
+            echo ""
+            echo "✓ Staging deploy complete — $(date)"
+            echo "  User site : https://staging.avirtrekkers.com"
+            echo "  Admin     : https://admin-staging.avirtrekkers.com"
+            echo "  API       : https://staging.avirtrekkers.com/api/health"

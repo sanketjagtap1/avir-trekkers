@@ -1,48 +1,42 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { getInquiries, updateInquiryStatus, replyToInquiry } from "../services/api";
 import {
   MessageCircle, Mail, Phone, Clock, Search, X,
-  CheckCircle2, Circle, ChevronDown, ChevronUp, Inbox,
+  CheckCircle2, Circle, ChevronDown, ChevronUp, Inbox, Loader2, Send,
 } from "lucide-react";
 
-// Sample inquiries — replace with API data when backend is ready
-const SAMPLE_INQUIRIES = [
+const REPLY_TEMPLATES = [
   {
-    id: "1", name: "Rahul Sharma", email: "rahul.sharma@example.com", phone: "+91 98765 43210",
-    subject: "Trek difficulty for beginners",
-    message: "Hi, I wanted to know if the Harishchandragad trek is suitable for first-time trekkers. We are a group of 4 people with no prior trekking experience. What level of fitness is required and what gear should we carry?",
-    createdAt: new Date(Date.now() - 2 * 3600000).toISOString(), status: "new",
+    label: "General Response",
+    text: `Thank you for reaching out to Avir Trekkers!\n\nWe've reviewed your inquiry and our team will get back to you with detailed information shortly. In the meantime, feel free to browse our upcoming treks at avirtrekkers.com.\n\nFor urgent queries, you can also reach us on WhatsApp at +91 97663 69007.\n\nWarm regards,\nTeam Avir Trekkers`,
   },
   {
-    id: "2", name: "Priya Patel", email: "priya.patel@example.com", phone: "+91 87654 32109",
-    subject: "Group booking discount",
-    message: "We are a group of 12 people planning for the Rajmachi Fort Trek & Camping. Is there any group discount available? Also, can we get a customised date for our group?",
-    createdAt: new Date(Date.now() - 5 * 3600000).toISOString(), status: "read",
+    label: "Trek Availability",
+    text: `Thank you for your interest in our trek!\n\nWe're happy to share that seats are available for the upcoming batch. To confirm your booking, please visit our website and fill out the enrollment form, or reply to this email with the number of participants and preferred date.\n\nOur team will share the complete itinerary, inclusions, and payment details once you confirm.\n\nLooking forward to trekking with you!\n\nWarm regards,\nTeam Avir Trekkers`,
   },
   {
-    id: "3", name: "Amit Kumar", email: "amit.kumar@example.com", phone: "+91 76543 21098",
-    subject: "Cancellation and refund policy",
-    message: "What is the cancellation and refund policy for booked treks? I have made a booking but there is an emergency and I may need to cancel. Please let me know the process.",
-    createdAt: new Date(Date.now() - 26 * 3600000).toISOString(), status: "replied",
+    label: "Payment Details",
+    text: `Thank you for your interest in joining us!\n\nHere are our payment details:\n\n• Bank: [Bank Name]\n• Account No: [Account Number]\n• IFSC: [IFSC Code]\n• Account Name: Avir Trekkers\n• UPI ID: [UPI ID]\n\nPlease share the payment screenshot after transfer and mention your Booking ID in the remarks.\n\nFor any payment-related queries, feel free to call or WhatsApp us at +91 97663 69007.\n\nWarm regards,\nTeam Avir Trekkers`,
   },
   {
-    id: "4", name: "Sneha Desai", email: "sneha.desai@example.com", phone: "+91 95678 34512",
-    subject: "Accommodation during trek",
-    message: "Does the trek package include accommodation? If so, what kind of accommodation is provided — tents, homestays or dormitories? Also, are meals included in the package price?",
-    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(), status: "new",
+    label: "Trek Full / Waitlist",
+    text: `Thank you for showing interest in our trek!\n\nUnfortunately, the current batch is fully booked. However, we can add you to our waitlist and notify you immediately if a spot opens up — or confirm your seat in the next upcoming batch.\n\nWould you like us to add you to the waitlist or register you for the next batch? Please reply with your preference.\n\nWarm regards,\nTeam Avir Trekkers`,
   },
   {
-    id: "5", name: "Vikram Joshi", email: "vikram.joshi@example.com", phone: "+91 91234 56789",
-    subject: "Age limit for Velas Turtle Festival",
-    message: "Is there any age restriction for the Velas Turtle Festival Trek? We want to bring our 10-year-old child along. Also is it safe for children and elderly people above 60?",
-    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(), status: "read",
+    label: "Cancellation Policy",
+    text: `Thank you for contacting us regarding the cancellation.\n\nOur cancellation policy is as follows:\n• Cancellation 15+ days before trek: 80% refund\n• Cancellation 7–14 days before trek: 50% refund\n• Cancellation within 7 days: No refund\n\nIf you'd like to proceed with the cancellation, please reply confirming your Booking ID and we'll process it within 24 hours.\n\nIf you'd prefer to reschedule instead, we're happy to transfer your booking to a future date at no extra charge.\n\nWarm regards,\nTeam Avir Trekkers`,
+  },
+  {
+    label: "Custom / Blank",
+    text: "",
   },
 ];
 
 const STATUS_META = {
-  new:     { label: "New",     cls: "bg-blue-500/15 text-blue-400",    dot: "bg-blue-400"     },
-  read:    { label: "Read",    cls: "bg-white/10 text-white/50",        dot: "bg-white/30"     },
-  replied: { label: "Replied", cls: "bg-emerald-500/15 text-emerald-400", dot: "bg-emerald-400" },
+  new:     { label: "New",     cls: "bg-blue-500/15 text-blue-400",       dot: "bg-blue-400"     },
+  read:    { label: "Read",    cls: "bg-white/10 text-white/50",           dot: "bg-white/30"     },
+  replied: { label: "Replied", cls: "bg-emerald-500/15 text-emerald-400",  dot: "bg-emerald-400"  },
 };
 
 function relativeTime(iso) {
@@ -50,112 +44,95 @@ function relativeTime(iso) {
   const mins  = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days  = Math.floor(diff / 86400000);
+  if (mins < 2)   return "just now";
   if (mins < 60)  return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   return `${days}d ago`;
 }
 
-// ── Reply drawer ───────────────────────────────────────────────────────────────
-function ReplyDrawer({ inquiry, onClose, onReplied }) {
-  const [body, setBody]       = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent]       = useState(false);
+export default function Inquiries() {
+  const [inquiries, setInquiries] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [search, setSearch]       = useState("");
+  const [statusFilter, setStatus] = useState("");
+  const [expandedId, setExpanded] = useState(null);
+  const [actionId, setActionId]   = useState(null);
 
-  const handleSend = async () => {
-    if (!body.trim()) return;
-    setSending(true);
-    // Simulate send — replace with real API call when available
-    await new Promise((r) => setTimeout(r, 900));
-    setSending(false);
-    setSent(true);
-    setTimeout(() => { onReplied(inquiry.id); onClose(); }, 1200);
+  // Reply drawer state
+  const [replyId, setReplyId]         = useState(null);
+  const [replyText, setReplyText]     = useState("");
+  const [replySending, setReplySending] = useState(false);
+  const [replyError, setReplyError]   = useState("");
+  const [replySuccess, setReplySuccess] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    getInquiries()
+      .then(r => setInquiries(r.data?.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(load, [load]);
+
+  const patchStatus = async (id, status) => {
+    setActionId(id);
+    try {
+      await updateInquiryStatus(id, status);
+      setInquiries(prev => prev.map(q => q._id === id ? { ...q, status } : q));
+    } catch {}
+    setActionId(null);
   };
 
-  return (
-    <AnimatePresence>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={onClose} className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50" />
-      <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
-        transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="fixed right-0 top-0 h-full w-full max-w-md bg-[#0f1117] border-l border-white/10 z-50 flex flex-col shadow-2xl"
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
-          <div>
-            <h2 className="text-base font-semibold text-white">Reply to {inquiry.name}</h2>
-            <p className="text-xs text-text-light">{inquiry.email}</p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/[0.06] text-white/50 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+  const handleExpand = (id, currentStatus) => {
+    const isOpening = expandedId !== id;
+    setExpanded(isOpening ? id : null);
+    if (isOpening && currentStatus === "new") patchStatus(id, "read");
+    // Close reply drawer if switching inquiry
+    if (replyId && replyId !== id) closeReply();
+  };
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-          {/* Original message */}
-          <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-4">
-            <p className="text-xs font-medium text-white/40 mb-1">Original Message — {inquiry.subject}</p>
-            <p className="text-sm text-white/70 leading-relaxed">{inquiry.message}</p>
-          </div>
+  const openReply = (id) => {
+    setReplyId(id);
+    setReplyText("");
+    setReplyError("");
+    setReplySuccess(false);
+  };
 
-          {/* Reply body */}
-          <div>
-            <label className="block text-xs font-medium text-white/50 mb-1.5">Your Reply</label>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={8}
-              placeholder={`Hi ${inquiry.name.split(" ")[0]},\n\nThank you for reaching out to Avir Trekkers...`}
-              className="w-full px-3 py-2.5 rounded-lg border border-white/10 bg-white/[0.06] text-white text-sm placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
-            />
-          </div>
+  const closeReply = () => {
+    setReplyId(null);
+    setReplyText("");
+    setReplyError("");
+    setReplySuccess(false);
+  };
 
-          <p className="text-xs text-white/30">
-            Note: Email sending integration will be connected when the backend is configured.
-            This action marks the inquiry as Replied.
-          </p>
-        </div>
+  const handleSendReply = async (inquiry) => {
+    if (!replyText.trim()) return;
+    setReplySending(true);
+    setReplyError("");
+    try {
+      await replyToInquiry(inquiry._id, replyText.trim());
+      setInquiries(prev => prev.map(q => q._id === inquiry._id ? { ...q, status: "replied" } : q));
+      setReplySuccess(true);
+      setReplyText("");
+      setTimeout(closeReply, 1500);
+    } catch (err) {
+      setReplyError(err?.response?.data?.error || "Failed to send reply. Please try again.");
+    } finally {
+      setReplySending(false);
+    }
+  };
 
-        <div className="px-6 py-4 border-t border-white/10 flex gap-3 flex-shrink-0">
-          <button onClick={onClose}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-white/60 text-sm font-medium hover:bg-white/[0.06] transition-colors">
-            Cancel
-          </button>
-          <button onClick={handleSend} disabled={sending || !body.trim() || sent}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors disabled:opacity-60">
-            {sent
-              ? <><CheckCircle2 className="w-4 h-4" /> Sent!</>
-              : sending
-                ? <><motion.div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending...</>
-                : <>Send Reply</>}
-          </button>
-        </div>
-      </motion.div>
-    </AnimatePresence>
-  );
-}
-
-// ── Main component ─────────────────────────────────────────────────────────────
-export default function Inquiries() {
-  const [inquiries, setInquiries]   = useState(SAMPLE_INQUIRIES);
-  const [search, setSearch]         = useState("");
-  const [statusFilter, setStatus]   = useState("");
-  const [expandedId, setExpandedId] = useState(null);
-  const [replyTarget, setReply]     = useState(null);
-
-  const markRead = (id) =>
-    setInquiries((prev) => prev.map((q) => q.id === id && q.status === "new" ? { ...q, status: "read" } : q));
-
-  const markReplied = (id) =>
-    setInquiries((prev) => prev.map((q) => q.id === id ? { ...q, status: "replied" } : q));
-
-  const filtered = inquiries.filter((q) => {
+  const filtered = inquiries.filter(q => {
     const matchSearch = !search ||
       q.name.toLowerCase().includes(search.toLowerCase()) ||
-      q.subject.toLowerCase().includes(search.toLowerCase());
+      q.subject.toLowerCase().includes(search.toLowerCase()) ||
+      q.email.toLowerCase().includes(search.toLowerCase());
     const matchStatus = !statusFilter || q.status === statusFilter;
     return matchSearch && matchStatus;
   });
 
-  const newCount = inquiries.filter((q) => q.status === "new").length;
+  const newCount = inquiries.filter(q => q.status === "new").length;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
@@ -168,6 +145,7 @@ export default function Inquiries() {
             </span>
           )}
         </div>
+        <button onClick={load} className="text-xs text-white/40 hover:text-white/70 transition-colors">Refresh</button>
       </div>
 
       {/* Filters */}
@@ -176,15 +154,15 @@ export default function Inquiries() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-light" />
           <input
             type="text"
-            placeholder="Search by name or subject..."
+            placeholder="Search by name, email or subject..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={e => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2 rounded-lg border border-white/10 bg-white/[0.06] text-white text-sm placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
           />
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatus(e.target.value)}
+          onChange={e => setStatus(e.target.value)}
           className="px-3 py-2 rounded-lg border border-white/10 bg-white/[0.06] text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
         >
           <option value="">All Statuses</option>
@@ -193,74 +171,64 @@ export default function Inquiries() {
           <option value="replied">Replied</option>
         </select>
         {(search || statusFilter) && (
-          <button
-            onClick={() => { setSearch(""); setStatus(""); }}
-            className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm text-text-light hover:bg-white/[0.06] transition-colors"
-          >
+          <button onClick={() => { setSearch(""); setStatus(""); }}
+            className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm text-text-light hover:bg-white/[0.06] transition-colors">
             <X className="w-3 h-3" /> Clear
           </button>
         )}
       </div>
 
       {/* List */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-white/30" /></div>
+      ) : filtered.length === 0 ? (
         <div className="glass-card rounded-2xl p-12 text-center">
           <Inbox className="w-10 h-10 text-white/15 mx-auto mb-3" />
-          <p className="text-text-light">No inquiries found.</p>
+          <p className="text-text-light text-sm">
+            {inquiries.length === 0 ? "No inquiries yet. Contact form submissions will appear here." : "No inquiries match your filters."}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((inquiry) => {
-            const isExpanded = expandedId === inquiry.id;
+          {filtered.map(inquiry => {
+            const isExpanded = expandedId === inquiry._id;
             const meta = STATUS_META[inquiry.status] || STATUS_META.read;
+            const busy = actionId === inquiry._id;
+            const isReplying = replyId === inquiry._id;
 
             return (
-              <motion.div
-                key={inquiry.id}
-                layout
+              <motion.div key={inquiry._id} layout
                 className={`glass-card rounded-2xl overflow-hidden transition-shadow ${inquiry.status === "new" ? "border border-blue-500/20" : ""}`}
               >
-                {/* Header row */}
+                {/* Header */}
                 <div
                   className="flex items-start gap-4 p-5 cursor-pointer hover:bg-white/[0.02] transition-colors"
-                  onClick={() => {
-                    setExpandedId(isExpanded ? null : inquiry.id);
-                    if (!isExpanded) markRead(inquiry.id);
-                  }}
+                  onClick={() => handleExpand(inquiry._id, inquiry.status)}
                 >
-                  {/* Unread dot */}
                   <div className="mt-1.5 flex-shrink-0">
-                    {inquiry.status === "new"
-                      ? <div className="w-2 h-2 rounded-full bg-blue-400" />
-                      : <div className="w-2 h-2 rounded-full bg-white/10" />}
+                    <div className={`w-2 h-2 rounded-full ${inquiry.status === "new" ? "bg-blue-400" : "bg-white/10"}`} />
                   </div>
-
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-0.5">
                       <span className={`font-medium text-sm ${inquiry.status === "new" ? "text-white" : "text-text"}`}>
                         {inquiry.name}
                       </span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${meta.cls}`}>
-                        {meta.label}
-                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${meta.cls}`}>{meta.label}</span>
                     </div>
                     <p className={`text-sm font-medium mb-0.5 ${inquiry.status === "new" ? "text-white/90" : "text-text-light"}`}>
                       {inquiry.subject}
                     </p>
                     <p className="text-xs text-white/30 line-clamp-1">{inquiry.message}</p>
                   </div>
-
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <span className="flex items-center gap-1 text-xs text-white/30">
                       <Clock className="w-3 h-3" /> {relativeTime(inquiry.createdAt)}
                     </span>
-                    {isExpanded
-                      ? <ChevronUp className="w-4 h-4 text-white/30" />
-                      : <ChevronDown className="w-4 h-4 text-white/30" />}
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-white/30" /> : <ChevronDown className="w-4 h-4 text-white/30" />}
                   </div>
                 </div>
 
-                {/* Expanded body */}
+                {/* Expanded */}
                 <AnimatePresence>
                   {isExpanded && (
                     <motion.div
@@ -269,46 +237,116 @@ export default function Inquiries() {
                       className="overflow-hidden"
                     >
                       <div className="px-5 pb-5 border-t border-white/[0.06]">
-                        {/* Contact info */}
                         <div className="flex flex-wrap gap-4 py-3 mb-3">
                           <span className="flex items-center gap-1.5 text-xs text-text-light">
-                            <Mail className="w-3.5 h-3.5" /> {inquiry.email}
+                            <Mail className="w-3.5 h-3.5" />
+                            <a href={`mailto:${inquiry.email}`} className="hover:text-white transition-colors">{inquiry.email}</a>
                           </span>
-                          <span className="flex items-center gap-1.5 text-xs text-text-light">
-                            <Phone className="w-3.5 h-3.5" /> {inquiry.phone}
-                          </span>
+                          {inquiry.phone && (
+                            <span className="flex items-center gap-1.5 text-xs text-text-light">
+                              <Phone className="w-3.5 h-3.5" /> {inquiry.phone}
+                            </span>
+                          )}
                         </div>
-
-                        {/* Full message */}
                         <div className="rounded-xl bg-white/[0.03] border border-white/[0.05] p-4 mb-4">
                           <p className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap">{inquiry.message}</p>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex gap-2">
+                        {/* Action buttons */}
+                        <div className="flex gap-2 flex-wrap mb-0">
                           <button
-                            onClick={() => setReply(inquiry)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+                            onClick={() => isReplying ? closeReply() : openReply(inquiry._id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              isReplying
+                                ? "bg-white/10 text-white/50"
+                                : "bg-blue-500 hover:bg-blue-600 text-white"
+                            }`}
                           >
-                            <MessageCircle className="w-3.5 h-3.5" /> Reply
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            {isReplying ? "Cancel Reply" : "Reply via Email"}
                           </button>
                           {inquiry.status !== "replied" && (
-                            <button
-                              onClick={() => markReplied(inquiry.id)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-text-light hover:bg-white/[0.06] text-xs font-medium transition-colors"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Mark as Replied
+                            <button disabled={busy} onClick={() => patchStatus(inquiry._id, "replied")}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-text-light hover:bg-white/[0.06] text-xs font-medium transition-colors disabled:opacity-50">
+                              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                              Mark Replied
                             </button>
                           )}
-                          {inquiry.status === "new" && (
-                            <button
-                              onClick={() => markRead(inquiry.id)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-text-light hover:bg-white/[0.06] text-xs font-medium transition-colors"
-                            >
-                              <Circle className="w-3.5 h-3.5" /> Mark as Read
+                          {inquiry.status === "read" && (
+                            <button disabled={busy} onClick={() => patchStatus(inquiry._id, "new")}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-text-light hover:bg-white/[0.06] text-xs font-medium transition-colors disabled:opacity-50">
+                              <Circle className="w-3.5 h-3.5" /> Mark New
                             </button>
                           )}
                         </div>
+
+                        {/* Reply Drawer */}
+                        <AnimatePresence>
+                          {isReplying && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Mail className="w-4 h-4 text-blue-400" />
+                                  <div className="text-xs text-white/50">
+                                    <span className="text-white/30">From:</span> contact@avirtrekkers.com
+                                    &nbsp;&nbsp;
+                                    <span className="text-white/30">To:</span> {inquiry.email}
+                                  </div>
+                                </div>
+
+                                {/* Template chips */}
+                                <div className="mb-3">
+                                  <p className="text-xs text-white/30 mb-2">Quick templates</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {REPLY_TEMPLATES.map(t => (
+                                      <button
+                                        key={t.label}
+                                        onClick={() => { setReplyText(t.text); setReplyError(""); }}
+                                        className="px-2.5 py-1 rounded-full text-xs border border-white/10 text-white/50 hover:border-blue-500/40 hover:text-blue-300 hover:bg-blue-500/10 transition-colors"
+                                      >
+                                        {t.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <textarea
+                                  rows={6}
+                                  value={replyText}
+                                  onChange={e => { setReplyText(e.target.value); setReplyError(""); }}
+                                  placeholder={`Write your reply to ${inquiry.name}...`}
+                                  className="w-full bg-white/[0.05] border border-white/10 rounded-lg px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
+                                />
+                                {replyError && (
+                                  <p className="text-xs text-red-400 mt-2">{replyError}</p>
+                                )}
+                                {replySuccess && (
+                                  <p className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Reply sent successfully!
+                                  </p>
+                                )}
+                                <div className="flex justify-end mt-3">
+                                  <button
+                                    disabled={replySending || !replyText.trim()}
+                                    onClick={() => handleSendReply(inquiry)}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
+                                  >
+                                    {replySending
+                                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending…</>
+                                      : <><Send className="w-3.5 h-3.5" /> Send Reply</>
+                                    }
+                                  </button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </motion.div>
                   )}
@@ -319,17 +357,10 @@ export default function Inquiries() {
         </div>
       )}
 
-      <p className="text-xs text-text-light mt-4">
-        Showing {filtered.length} of {inquiries.length} inquir{inquiries.length !== 1 ? "ies" : "y"}
-      </p>
-
-      {/* Reply drawer */}
-      {replyTarget && (
-        <ReplyDrawer
-          inquiry={replyTarget}
-          onClose={() => setReply(null)}
-          onReplied={markReplied}
-        />
+      {!loading && (
+        <p className="text-xs text-text-light mt-4">
+          Showing {filtered.length} of {inquiries.length} inquir{inquiries.length !== 1 ? "ies" : "y"}
+        </p>
       )}
     </motion.div>
   );

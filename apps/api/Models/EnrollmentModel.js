@@ -96,7 +96,7 @@ const enrollmentSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ["Online", "Cash", "Bank Transfer"]
+        enum: ["Online", "Cash", "Bank Transfer", "UPI", "NEFT", "IMPS"]
     },
     transactionId: {
         type: String

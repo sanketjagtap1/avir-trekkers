@@ -9,6 +9,8 @@ const categoryRouter = require("./routes/categoryRoutes")
 const reviewRouter = require("./routes/reviewRoutes")
 const galleryRouter = require("./routes/galleryRoutes")
 const passwordResetRoutes = require("./routes/passwordResetRoutes")
+const siteRouter = require("./routes/siteRoutes")
+const contactRouter = require("./routes/contactRoutes")
 const cors = require("cors")
 const mongoSanitize = require("express-mongo-sanitize");
 const hpp = require("hpp");
@@ -89,6 +91,8 @@ app.use("/api/enrollments", enrollmentRouter);
 app.use("/api/categories", categoryRouter);
 app.use("/api/reviews", reviewRouter);
 app.use("/api/gallery", galleryRouter);
+app.use("/api/site", siteRouter);
+app.use("/api/contact", contactRouter);
 app.use("/api/auth", passwordResetRoutes);
 
 // Health check endpoint

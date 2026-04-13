@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   LayoutDashboard, Mountain, Users, Image, Star, MessageSquare,
-  FolderOpen, Settings, LogOut, ChevronLeft, Menu
+  FolderOpen, Settings, LogOut, ChevronLeft, Menu, Globe
 } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -15,6 +15,7 @@ const navItems = [
   { name: "Gallery", path: "/gallery", icon: Image },
   { name: "Reviews", path: "/reviews", icon: Star },
   { name: "Inquiries", path: "/inquiries", icon: MessageSquare },
+  { name: "Site Content", path: "/site-content", icon: Globe },
   { name: "Settings", path: "/settings", icon: Settings },
 ];
 

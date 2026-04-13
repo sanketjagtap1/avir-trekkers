@@ -3,7 +3,12 @@ const jwt = require("jsonwebtoken");
 const Enrollment = require("../Models/EnrollmentModel");
 const Trek = require("../Models/TrekModel");
 const OTP = require("../Models/OTPModel");
-const { sendOtpEmail } = require("../utils/emailService");
+const {
+    sendOtpEmail,
+    sendEnrollmentConfirmation,
+    sendPaymentConfirmation,
+    sendCancellationConfirmation,
+} = require("../utils/emailService");
 
 const JWT_SECRET = process.env.JWT_SECRET || "your_secret_key";
 const VERIFICATION_TOKEN_EXPIRY = "15m";
@@ -118,15 +123,9 @@ const enrollInTrek = async (req, res) => {
         const { trekId, primaryContact, participants: rawParticipants, enrollmentData: legacyData, verificationToken } = req.body;
         const userId = req.user ? req.user.userId : null;
 
-        // Require OTP verification for all enrollments
-        if (!verificationToken) {
-            return res.status(400).json({
-                success: false,
-                error: "Please verify your email with OTP before enrolling."
-            });
-        }
-        const verifiedEmail = verifyEnrollmentToken(verificationToken);
-        if (!verifiedEmail) {
+        // OTP verification — optional until SMS service is integrated
+        const verifiedEmail = verificationToken ? verifyEnrollmentToken(verificationToken) : null;
+        if (verificationToken && !verifiedEmail) {
             return res.status(400).json({
                 success: false,
                 error: "Verification expired or invalid. Please verify your email again."
@@ -164,8 +163,8 @@ const enrollInTrek = async (req, res) => {
             });
         }
 
-        // Primary contact email must match the email verified with OTP
-        if (primary.email.trim().toLowerCase() !== verifiedEmail) {
+        // When OTP is active: primary contact email must match verified email
+        if (verifiedEmail && primary.email.trim().toLowerCase() !== verifiedEmail) {
             return res.status(400).json({
                 success: false,
                 error: "Primary contact email must match the email you verified with OTP."
@@ -229,6 +228,18 @@ const enrollInTrek = async (req, res) => {
             .populate('trek', 'title startDate endDate location')
             .populate('user', 'fullName email')
             .lean();
+
+        // Send confirmation emails (fire-and-forget — don't block response)
+        const emailData = {
+            primaryContact: primaryContactDoc,
+            trek: { title: trek.title, startDate: trek.startDate, endDate: trek.endDate, location: trek.location, duration: trek.duration, difficulty: trek.difficulty },
+            bookingId: bookingId.toString(),
+            participants,
+            paymentAmount: trek.price * participants.length,
+        };
+        if (primaryContactDoc.email) {
+            sendEnrollmentConfirmation(emailData).catch(err => console.error("Enrollment confirmation email failed:", err));
+        }
 
         res.status(201).json({
             success: true,
@@ -322,19 +333,38 @@ const updateEnrollment = async (req, res) => {
         const { id } = req.params;
         const updateData = req.body;
 
+        // Capture previous payment status before update
+        const before = await Enrollment.findById(id).select("paymentStatus primaryContact trek").lean();
+
         const enrollment = await Enrollment.findByIdAndUpdate(
             id,
             { ...updateData, updatedAt: new Date() },
             { new: true, runValidators: true }
         )
-        .populate('trek', 'title startDate endDate location')
+        .populate('trek', 'title startDate endDate location duration difficulty price')
         .populate('user', 'fullName email');
 
         if (!enrollment) {
-            return res.status(404).json({
-                success: false,
-                error: "Enrollment not found"
-            });
+            return res.status(404).json({ success: false, error: "Enrollment not found" });
+        }
+
+        // Fire payment emails when status changes to Paid
+        const newStatus = updateData.paymentStatus;
+        if (newStatus === "Paid" && before?.paymentStatus !== "Paid") {
+            const pc = enrollment.primaryContact;
+            const trek = enrollment.trek;
+            const emailData = {
+                primaryContact: pc,
+                trek,
+                bookingId: enrollment.bookingId?.toString() || id,
+                paymentAmount: updateData.paymentAmount || enrollment.paymentAmount,
+                paymentMethod: updateData.paymentMethod,
+                transactionId: updateData.transactionId,
+                paymentDate: updateData.paymentDate || new Date(),
+            };
+            if (pc?.email) {
+                sendPaymentConfirmation(emailData).catch(err => console.error("Payment confirmation email failed:", err));
+            }
         }
 
         res.status(200).json({
@@ -387,10 +417,21 @@ const cancelEnrollment = async (req, res) => {
             }
         }
 
-        await Enrollment.findByIdAndUpdate(id, {
-            enrollmentStatus: "Cancelled",
-            updatedAt: new Date()
-        });
+        const cancelledEnrollment = await Enrollment.findByIdAndUpdate(
+            id,
+            { enrollmentStatus: "Cancelled", updatedAt: new Date() },
+            { new: true }
+        ).populate('trek', 'title startDate endDate location duration difficulty').lean();
+
+        // Send cancellation email (fire-and-forget)
+        const pc = enrollment.primaryContact;
+        if (pc?.email && cancelledEnrollment) {
+            sendCancellationConfirmation({
+                primaryContact: pc,
+                trek: cancelledEnrollment.trek || {},
+                bookingId: enrollment.bookingId?.toString() || id,
+            }).catch(err => console.error("Cancellation email failed:", err));
+        }
 
         res.status(200).json({
             success: true,
