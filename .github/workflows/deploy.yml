@@ -64,11 +64,11 @@ jobs:
 
       - name: Build user-site
         working-directory: apps/user-site
-        run: npm ci && npm run build
+        run: npm install --legacy-peer-deps && npm run build
 
       - name: Build admin-portal
         working-directory: apps/admin-portal
-        run: npm ci && npm run build
+        run: npm install --legacy-peer-deps && npm run build
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
