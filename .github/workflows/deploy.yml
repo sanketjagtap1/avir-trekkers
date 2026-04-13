@@ -178,8 +178,7 @@ jobs:
             rm -f /tmp/avir_nginx_candidate.conf
 
             # ── GHCR auth & pull latest images ──────────────────────────────
-            printf '%s' "${{ secrets.GHCR_READ_TOKEN }}" | \
-              docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+            docker login ghcr.io -u ${{ github.repository_owner }} -p "${{ secrets.GHCR_READ_TOKEN }}"
 
             cd /opt/avir-trekkers
             docker compose pull
